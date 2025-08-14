@@ -172,13 +172,16 @@ class ApiService {
 
   // Code Execution
   async executeCode(code: string, input: string = ''): Promise<ExecutionResult> {
-    await this.delay(1500); // Simulate execution time
-    
+    // Try real remote execution first; fall back to mock if it fails
     try {
-      // This is a mock implementation
-      // In a real application, this would send code to a secure sandbox
-      const result = this.mockPythonExecution(code, input);
-      return result;
+      const real = await this.executeCodeRemote(code, input);
+      if (real) return real;
+    } catch (err) {
+      console.warn('Remote execution failed, falling back to mock:', err);
+    }
+    // Fallback mock (instant)
+    try {
+      return this.mockPythonExecution(code, input);
     } catch (error) {
       return {
         output: '',
@@ -187,6 +190,68 @@ class ApiService {
         memoryUsed: 0,
         success: false
       };
+    }
+  }
+
+  /**
+   * Execute Python code using the public Piston API (https://github.com/engineer-man/piston)
+   * No API key is required, but rate limits may apply. For production, proxy this through
+   * your backend to enforce quotas & security.
+   */
+  private async executeCodeRemote(code: string, input: string): Promise<ExecutionResult | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+    const start = performance.now();
+
+    const API_BASE = (import.meta as any).env?.VITE_PISTON_API || 'https://emkc.org/api/v2/piston';
+    const url = `${API_BASE}/execute`;
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          language: 'python',
+          version: '3.10.0',
+          files: [ { name: 'main.py', content: code } ],
+          stdin: input || undefined
+        }),
+        signal: controller.signal
+      });
+
+      if (!res.ok) {
+        console.warn('Piston execute non-ok status', res.status);
+        return null; // trigger fallback
+      }
+
+      const data: any = await res.json();
+      // Data shape: { run: { stdout, stderr, code, signal, output }, compile: {...}? }
+      const run = data.run || {};
+      const stdout: string = run.stdout || '';
+      const stderr: string = run.stderr || '';
+      const exitCode: number | undefined = run.code;
+      const execTime = Math.round(performance.now() - start);
+
+      return {
+        output: stdout.trim(),
+        error: stderr ? stderr.trim() : undefined,
+        executionTime: execTime,
+        memoryUsed: 0, // Piston does not return memory usage in this endpoint
+        success: !stderr && exitCode === 0
+      };
+    } catch (e) {
+      if ((e as any).name === 'AbortError') {
+        return {
+          output: '',
+          error: 'Execution timed out',
+          executionTime: 10000,
+          memoryUsed: 0,
+          success: false
+        };
+      }
+      return null; // fallback
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

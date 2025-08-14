@@ -64,6 +64,15 @@ Core domain models live in `src/types/index.ts` (User, Tutorial, Problem, TestCa
 ## Code Editor
 `CodeEditor` + `OutputPanel` compose a minimal coding workspace using Monaco. Execution is not wired to a backend yet—extend `apiService` or add a serverless endpoint to run code securely (e.g., sandboxed container / third‑party API).
 
+### Real Python Execution
+The app now attempts real execution via the public Piston API (Python 3.10). If the remote call fails (network / rate limit), it falls back to a lightweight mock evaluator.
+
+Override the Piston API base (optional) by creating a `.env` file:
+```bash
+VITE_PISTON_API=https://your-proxy.example.com/api/v2/piston
+```
+For production you should proxy requests through your own backend to enforce limits and hide third‑party endpoints.
+
 ## Deployment (Vercel)
 Live Production: https://python-learning-platform-sigma.vercel.app/
 
